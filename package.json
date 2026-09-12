@@ -1,0 +1,30 @@
+{
+  "name": "backtracking-arena",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Backtracking level for the SCIS Connect competition - pattern-inference C problems with a sandboxed judge",
+  "scripts": {
+    "dev": "node server.js",
+    "build": "next build",
+    "start": "NODE_ENV=production node server.js",
+    "lint": "next lint",
+    "seed:problems": "node scripts/seedProblems.js",
+    "check:sandbox": "node scripts/checkSandbox.js",
+    "test:judge": "node scripts/testJudge.js"
+  },
+  "dependencies": {
+    "mongoose": "^8.9.3",
+    "next": "^15.5.4",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
+    "eslint": "^9.36.0",
+    "eslint-config-next": "^15.5.4",
+    "tailwindcss": "^4.3.0"
+  }
+}

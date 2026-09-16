@@ -1,138 +1,116 @@
 # Folding this into Quiz Mania
 
-This folder deliberately mirrors Quiz Mania's structure and conventions —
-same `{ success, data }` envelopes, same `@/*` alias, same cached-Mongoose
-pattern, same Tailwind idiom — so integration is mostly copying directories.
-
-**There are no new npm dependencies.** Both projects use the same six packages.
+This folder mirrors Quiz Mania's structure and conventions — `{ success, data }`
+envelopes, the `@/*` alias, the cached-Mongoose pattern, the Tailwind idiom — so
+integration is mostly copying directories. **There are no new npm
+dependencies**: both projects use the same six packages.
 
 ## 1. Copy the files that have no counterpart
 
-These land in Quiz Mania untouched:
-
 ```
-src/lib/judge/                 -> src/lib/judge/
-src/lib/auth.js                -> src/lib/auth.js
-src/lib/scoring.js             -> src/lib/scoring.js
-src/lib/rateLimit.js           -> src/lib/rateLimit.js
-src/lib/realtime.js            -> src/lib/realtime.js
-src/lib/leaderboardService.js  -> src/lib/leaderboardService.js
-src/lib/identity.js            -> src/lib/identity.js
-src/lib/apiClient.js           -> src/lib/apiClient.js
-src/lib/api.js                 -> src/lib/api.js
-src/models/Problem.js          -> src/models/Problem.js
-src/models/Submission.js       -> src/models/Submission.js
-src/models/Contest.js          -> src/models/Contest.js
-src/app/api/arena/             -> src/app/api/arena/
-src/app/arena/                 -> src/app/arena/
-src/app/admin/                 -> src/app/admin/
-src/hooks/useArena.js          -> src/hooks/useArena.js
-scripts/problemCards.js        -> scripts/problemCards.js
-scripts/seedProblems.js        -> scripts/seedProblems.js
-scripts/testJudge.js           -> scripts/testJudge.js
-scripts/testApi.js             -> scripts/testApi.js
-scripts/loadTest.js            -> scripts/loadTest.js
+src/lib/judge/                      src/lib/engine/
+src/lib/auth.js                     src/lib/scoring.js
+src/lib/rateLimit.js                src/lib/realtime.js
+src/lib/leaderboardService.js       src/lib/identity.js
+src/lib/apiClient.js                src/lib/api.js
+src/lib/playground.js
+src/models/Problem.js               src/models/Submission.js
+src/models/Contest.js               src/models/TerminalOutput.js
+src/app/api/arena/                  src/app/arena/[slug]/
+src/app/admin/                      src/hooks/useArena.js
+src/server/socket/arenaHandlers.js
+scripts/                            (everything except Quiz Mania's own seedQuiz.js)
+certs/                              (the engine CA certificate, not committed)
 ```
 
-Components: copy `ArenaHome.js`, `ProblemWorkspace.js`, `AdminConsole.js`,
-`CodeEditor.js`, `SamplePattern.js`, `VerdictPanel.js`, `ArenaLeaderboard.js`,
-`ContestTimer.js`, `IdentityBadge.js` into `src/components/`. None of these
-names collide with Quiz Mania's existing components.
+Components — none collide with Quiz Mania's: `ArenaHome.js`,
+`ProblemWorkspace.js`, `Terminal.js`, `AdminConsole.js`, `CodeEditor.js`,
+`VerdictPanel.js`, `ArenaLeaderboard.js`, `ContestTimer.js`, `IdentityBadge.js`.
 
-## 2. Merge the three files that do collide
+This project's `src/app/page.js` (the arena home) becomes
+`src/app/arena/page.js`, because Quiz Mania owns `/`. In `ProblemWorkspace.js`,
+change the "All problems" link from `/` to `/arena`.
+
+## 2. Merge the four files that collide
 
 ### `src/lib/db.js` — keep Quiz Mania's
 
-Delete this folder's copy. They are the same implementation with a different
-`globalThis` cache key. Everything here imports `connectDB` by name, so nothing
-changes.
+Everything here imports `connectDB` by name, so nothing else changes.
 
 ### `src/lib/constants.js` — append
 
 Paste this project's `LEVELS`, `PROBLEM_STATUS`, `CONTEST_STATUS`, `VERDICT`,
 `TEST_STATUS`, `VERDICT_LABEL`, `ARENA_SOCKET_EVENTS` and `ARENA_NAMESPACE`
-exports into Quiz Mania's `constants.js`. Nothing overlaps — Quiz Mania has
-`QUIZ_STATUS`, `ROOM_STATUS` and `SOCKET_EVENTS`, and the arena events are
-namespaced `arena:*` precisely so they can coexist.
+exports into Quiz Mania's file. No names overlap.
 
-### `src/server/socket/index.js` — add one call
+### `src/lib/socketClient.js` — keep both sets of exports
 
-Quiz Mania builds its Socket.IO server and registers quiz handlers. Add the
-arena namespace beside it:
+Both projects have this file with different exports: Quiz Mania's
+`getSocket` / `disconnectSocket` (default namespace, `playerId` auth) and this
+project's `getArenaSocket` / `resetArenaSocket` (`/arena` namespace, JWT auth).
+Put all four in one file. Connect the arena socket with the same
+`path: '/socket.io'` Quiz Mania's server sets.
+
+### `src/server/socket/index.js` — add the `/arena` namespace
+
+Quiz Mania's file exports `initSocketServer(httpServer)` and registers quiz
+handlers on each connection. Add, before it returns `io`:
 
 ```js
-import { attachArenaSocket } from './arenaSocket.js';   // this project's src/server/socket/index.js
+import { registerArenaHandlers } from './arenaHandlers.js';
+import { ARENA_NAMESPACE } from '../../lib/constants.js';
+import { identityFromHeaders } from '../../lib/auth.js';
+import { setArenaNamespace } from '../../lib/realtime.js';
 
-export const createSocketServer = (httpServer) => {
-  const io = new Server(httpServer, { cors: { origin: process.env.CLIENT_ORIGIN || '*' } });
-
-  registerQuizHandlers(io);   // existing
-  attachArenaSocket(io);      // new: mounts the /arena namespace
-
-  return io;
-};
+const arena = io.of(ARENA_NAMESPACE);
+arena.use((socket, next) => {
+  const identity = identityFromHeaders({
+    get: (key) => socket.handshake.auth?.[key] ?? socket.handshake.headers?.[key] ?? null,
+  });
+  if (!identity) return next(new Error('unauthorized'));
+  socket.data.identity = identity;
+  return next();
+});
+registerArenaHandlers(arena);
+setArenaNamespace(arena);
 ```
 
-Copy this project's `src/server/socket/index.js` in as
-`src/server/socket/arenaSocket.js` (exporting `attachArenaSocket`) and its
-`arenaHandlers.js` alongside. Quiz events stay on the default namespace, arena
-events on `/arena`; one server, one port, no interference.
+Quiz events stay on the default namespace, arena events on `/arena`.
+
+Quiz Mania's `server.js` already loads `.env*` before importing the rest, which
+this project's server also does — keep that ordering.
 
 ## 3. Env and scripts
 
-Append to Quiz Mania's `.env.example`:
+Append this project's `.env.example` section (auth, admin ids, `JUDGE_BACKEND`,
+`QUERY_SERVER_URL`, `QUERY_SERVER_API_KEY`, `QUERY_SERVER_CA_CERT`,
+`ENGINE_CONCURRENCY`, cooldown) to Quiz Mania's. The API key goes in
+`.env.local` only.
 
-```
-AUTH_JWT_SECRET=
-AUTH_JWT_ISSUER=
-ALLOW_DEV_AUTH=false
-ADMIN_USER_IDS=
-JUDGE_CONCURRENCY=3
-JUDGE_SUBMIT_COOLDOWN_MS=5000
-JUDGE_WORKDIR=/tmp/arena-judge
-```
+Add to `package.json` scripts: `seed:problems`, `verify:cards`, `check:engine`,
+`test:engine`, `test:judge` (same commands as here).
 
-Add to `package.json` scripts:
+Both projects can share one database: `problems`, `terminaloutputs`,
+`submissions` and `contests` don't collide with `quizzes`, `rooms` or
+`attempts`.
 
-```json
-"seed:problems": "node scripts/seedProblems.js",
-"test:judge": "node scripts/testJudge.js"
-```
-
-Both projects can share one database — the collections (`problems`,
-`submissions`, `contests`) do not collide with `quizzes`, `rooms` or `attempts`.
+After copying: `npm run seed:problems && npm run verify:cards`, then
+`npm run check:engine` from the campus network.
 
 ## 4. Link it up
-
-Add an entry point from Quiz Mania's home page:
 
 ```jsx
 <Link href="/arena">Level 2 — Backtracking</Link>
 ```
 
-## Where the two projects disagree, and why it matters
+## Where the two projects disagree
 
-Quiz Mania's README flags that its socket middleware trusts whatever `playerId`
-a client sends, so a player can claim any identity including the host's. **This
-project does not have that gap** — `src/lib/auth.js` verifies an HS256 JWT on
-both the HTTP API and the socket handshake, and rejects `alg: none`.
-
-After the merge, point Quiz Mania's socket auth at the same `auth.js` and its
-`lib/player.js` placeholder disappears. Until that happens the two halves have
-different trust models, which is worth being deliberate about rather than
-discovering during the contest.
+Quiz Mania's socket middleware trusts whatever `playerId` a client sends. This
+project verifies an HS256 JWT on both the HTTP API and the socket handshake
+(`src/lib/auth.js`). After merging, point Quiz Mania's socket auth at the same
+`auth.js` so both halves share one trust model.
 
 ## Deployment note
 
-The judge queue (`src/lib/judge/queue.js`) and the submit rate limiter
-(`src/lib/rateLimit.js`) hold state in the process — the same single-instance
-caveat Quiz Mania already documents for its socket state. Run one instance, or
-move all three to Redis together.
-
-The host needs `gcc` and `bwrap` installed, and unprivileged user namespaces
-enabled (`/proc/sys/kernel/unprivileged_userns_clone` = 1). Many managed
-container platforms disable user namespaces, which breaks bubblewrap; if the
-target host is one of those, reimplement `execSandbox` in
-`src/lib/judge/sandbox.js` against Docker. That one function is the whole
-isolation boundary — run `npm run test:judge` afterwards and it will tell you
-whether the replacement actually contains anything.
+The engine request limiter, the local judge queue and the submit rate limiter
+all hold state in the process. Run one instance.

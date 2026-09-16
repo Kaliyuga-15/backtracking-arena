@@ -106,7 +106,13 @@ export default function ArenaHome({ contestKey, problems }) {
                           Not attempted
                         </span>
                       )}
-                      <span className="text-white/30">{problem.timeLimitMs}ms limit</span>
+                      <span
+                        className={
+                          problem.difficulty === 'hard' ? 'text-red-300/70' : 'text-amber-300/70'
+                        }
+                      >
+                        {problem.difficulty === 'hard' ? 'Hard' : 'Medium'}
+                      </span>
                     </div>
                   </Link>
                 </li>

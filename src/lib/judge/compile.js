@@ -28,7 +28,11 @@ export const compileSource = async ({ source, workdir }) => {
   });
 
   if (!result.ok) {
-    return { ok: false, diagnostics: `Judge could not start the compiler: ${result.spawnError}` };
+    return { ok: false, internal: true, diagnostics: `Judge could not start the compiler: ${result.spawnError}` };
+  }
+
+  if (result.setupFailed) {
+    return { ok: false, internal: true, diagnostics: 'The judge could not start the compiler. Please submit again.' };
   }
 
   if (result.timedOut) {

@@ -6,7 +6,8 @@ import { useArena } from '@/hooks/useArena';
 import { apiFetch } from '@/lib/apiClient';
 import { currentUser } from '@/lib/identity';
 import CodeEditor from './CodeEditor';
-import SamplePattern from './SamplePattern';
+import Terminal from './Terminal';
+import { describeField } from '@/lib/playground';
 import VerdictPanel from './VerdictPanel';
 import ContestTimer from './ContestTimer';
 
@@ -79,6 +80,11 @@ export default function ProblemWorkspace({ contestKey, problem }) {
   const accepting = contest?.accepting ?? false;
   const canSubmit = ready && signedIn && !pending && source.trim().length > 0;
 
+  let terminalBlocked = null;
+  if (!signedIn) terminalBlocked = 'Enter your name in the top right to use the terminal.';
+  else if (!contest) terminalBlocked = 'Connecting...';
+  else if (contest.status === 'scheduled') terminalBlocked = 'The terminal opens when the contest starts.';
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -97,7 +103,16 @@ export default function ProblemWorkspace({ contestKey, problem }) {
                 {problem.points} pts
               </span>
             </div>
-            <p className="mt-1 text-xs text-white/40">
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/40">
+              <span
+                className={`rounded-full px-2 py-0.5 font-medium ${
+                  problem.difficulty === 'hard'
+                    ? 'bg-red-500/15 text-red-200'
+                    : 'bg-amber-500/15 text-amber-200'
+                }`}
+              >
+                {problem.difficulty === 'hard' ? 'Hard' : 'Medium'}
+              </span>
               {problem.timeLimitMs}ms per test · {problem.memoryMb}MB · C only
             </p>
           </header>
@@ -106,11 +121,37 @@ export default function ProblemWorkspace({ contestKey, problem }) {
             <p className="text-sm leading-6 text-white/70">{problem.statement}</p>
           ) : null}
 
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wider text-white/35">Input</p>
+              <p className="mono mt-1 text-sm text-white/80">{problem.inputFormat}</p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wider text-white/35">Constraints</p>
+              <ul className="mono mt-1 space-y-0.5 text-sm text-white/80">
+                {problem.judgeFields.map((field) => (
+                  <li key={field.name}>{describeField(field)}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
           <div>
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-white/50">
-              The pattern
+              Explore the pattern
             </h2>
-            <SamplePattern samples={problem.samples} />
+            <Terminal
+              slug={problem.slug}
+              version={problem.terminalVersion}
+              fields={problem.terminalFields}
+              contestKey={contestKey}
+              available={!terminalBlocked}
+              unavailableMessage={terminalBlocked}
+            />
+            <p className="mt-2 text-xs text-white/35">
+              The terminal accepts every value in the constraints. Your program is judged
+              on values from the same range.
+            </p>
           </div>
 
           {problem.hint ? (

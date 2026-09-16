@@ -76,9 +76,12 @@ export const POST = withErrors(async (request) => {
         comparison: problem.comparison,
       },
     });
-  } finally {
-    releaseSubmitSlot(identity.userId);
+  } catch (err) {
+    // Judge unavailable: nothing was scored, so no cooldown either.
+    releaseSubmitSlot(identity.userId, { startCooldown: false });
+    throw err;
   }
+  releaseSubmitSlot(identity.userId);
 
   const score = scoreFor({
     points: problem.points,

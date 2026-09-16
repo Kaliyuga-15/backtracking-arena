@@ -18,7 +18,12 @@ export const GET = withErrors(async (request) => {
   if (!includeUnpublished) filter.status = PROBLEM_STATUS.PUBLISHED;
   if (includeUnpublished) requireAdmin(request);
 
-  const problems = await Problem.find(filter).sort({ order: 1, createdAt: 1 }).lean();
+  // Small-test outputs stay server-side for contestants: the card's contract is
+  // that outputs are discovered through the terminal, not listed up front.
+  const problems = await Problem.find(filter)
+    .select(includeUnpublished ? '' : '-samples')
+    .sort({ order: 1, createdAt: 1 })
+    .lean();
 
   return ok(problems);
 });

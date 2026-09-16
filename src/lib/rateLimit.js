@@ -29,7 +29,22 @@ export const claimSubmitSlot = (userId) => {
   return { allowed: true };
 };
 
-export const releaseSubmitSlot = (userId) => {
+export const releaseSubmitSlot = (userId, { startCooldown = true } = {}) => {
   state.inFlight.delete(userId);
-  state.lastSubmit.set(userId, Date.now());
+  if (startCooldown) state.lastSubmit.set(userId, Date.now());
+};
+
+// Terminal runs are unlimited in number, but one contestant gets one run at a
+// time so a held-down Enter key cannot flood the judge queue.
+const terminalInFlight = globalThis.__arenaTerminalInFlight ?? new Set();
+globalThis.__arenaTerminalInFlight = terminalInFlight;
+
+export const claimTerminalSlot = (userId) => {
+  if (terminalInFlight.has(userId)) return false;
+  terminalInFlight.add(userId);
+  return true;
+};
+
+export const releaseTerminalSlot = (userId) => {
+  terminalInFlight.delete(userId);
 };

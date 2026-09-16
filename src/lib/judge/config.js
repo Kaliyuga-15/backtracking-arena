@@ -29,6 +29,16 @@ export const JUDGE_LIMITS = {
     // fail. Remaining cases are reported as skipped once this is spent.
     maxTotalRunMs: 12000,
   },
+
+  // The exploration terminal accepts every value a card's judge tests use, so it
+  // must be able to return the largest judge-sized output.
+  terminal: {
+    maxInputChars: 200,
+    maxOutputBytes: 1024 * 1024,
+    timeLimitMs: 3000,
+    memoryMb: 256,
+    cachedOutputs: 5000,
+  },
 };
 
 export const GCC = 'gcc';
@@ -46,3 +56,6 @@ export const judgeConcurrency = () => {
 };
 
 export const judgeWorkdir = () => process.env.JUDGE_WORKDIR || '/tmp/arena-judge';
+
+// engine = campus code execution engine; local = bubblewrap on this host.
+export const judgeBackend = () => (process.env.JUDGE_BACKEND === 'engine' ? 'engine' : 'local');

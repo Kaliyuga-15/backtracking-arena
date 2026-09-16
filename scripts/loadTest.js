@@ -9,11 +9,15 @@
 const BASE = process.env.ARENA_BASE_URL || 'http://localhost:4100';
 const USERS = Number.parseInt(process.argv[2] ?? '100', 10);
 
+// Card 1 (distinct partitions). Its largest test prints ~150KB, so this
+// measures output-heavy judging, not just process startup.
 const SOLUTION = `#include <stdio.h>
-static int n; static char b[40];
-static void rec(int i){ if(i==n){ b[n]=0; printf("%s\\n", b); return; }
-  b[i]='0'; rec(i+1); b[i]='1'; rec(i+1); }
-int main(void){ if(scanf("%d",&n)!=1) return 1; rec(0); return 0; }
+static int n, part[80];
+static void rec(int idx, int rem, int maxp) {
+  if (rem == 0) { for (int i = 0; i < idx; i++) printf("%d%c", part[i], i + 1 == idx ? '\\n' : ' '); return; }
+  for (int p = rem < maxp ? rem : maxp; p >= 1; p--) { if ((long long)p * (p + 1) / 2 < rem) break; part[idx] = p; rec(idx + 1, rem - p, p - 1); }
+}
+int main(void) { if (scanf("%d", &n) != 1) return 1; rec(0, n, n); return 0; }
 `;
 
 const submit = async (index) => {
@@ -25,7 +29,7 @@ const submit = async (index) => {
       'x-dev-user-id': `load-${index}`,
       'x-dev-user-name': `Load ${index}`,
     },
-    body: JSON.stringify({ problemSlug: 'switches', source: SOLUTION }),
+    body: JSON.stringify({ problemSlug: 'distinct-pieces', source: SOLUTION }),
   });
 
   const payload = await response.json().catch(() => null);

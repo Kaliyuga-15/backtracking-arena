@@ -10,8 +10,11 @@
     "start": "NODE_ENV=production node server.js",
     "lint": "next lint",
     "seed:problems": "node scripts/seedProblems.js",
-    "check:sandbox": "node scripts/checkSandbox.js",
-    "test:judge": "node scripts/testJudge.js"
+    "test:judge": "node scripts/testJudge.js",
+    "verify:cards": "node scripts/verifyCards.js",
+    "check:engine": "node scripts/checkEngine.js",
+    "test:engine": "node scripts/testEngineClient.js",
+    "mock:engine": "node scripts/mockEngine.js"
   },
   "dependencies": {
     "mongoose": "^8.9.3",

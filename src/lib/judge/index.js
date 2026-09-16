@@ -1,29 +1,15 @@
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { execSandbox } from './sandbox.js';
 import { compileSource } from './compile.js';
 import { outputMatches, COMPARISON } from './compare.js';
 import { enqueue } from './queue.js';
-import { JUDGE_LIMITS, judgeWorkdir } from './config.js';
+import { runOneTest } from './run.js';
+import { judgeWithEngine, runInputsOnEngine } from './engine.js';
+import { JUDGE_LIMITS, judgeBackend, judgeConcurrency, judgeWorkdir } from './config.js';
 import { TEST_STATUS, VERDICT } from '../constants.js';
 
-const runOneTest = async ({ binaryPath, input, timeLimitMs, memoryMb }) => {
-  const { run } = JUDGE_LIMITS;
-
-  return execSandbox({
-    argv: ['/prog'],
-    sandboxArgs: ['--clearenv', '--ro-bind', binaryPath, '/prog', '--chdir', '/'],
-    stdin: input ?? '',
-    cpuSeconds: Math.ceil(timeLimitMs / 1000) + run.cpuGraceSeconds,
-    addressSpaceBytes: memoryMb * 1024 * 1024,
-    fileSizeBytes: run.maxOutputBytes,
-    wallTimeoutMs: timeLimitMs + run.wallGraceMs,
-    maxOutputBytes: run.maxOutputBytes,
-  });
-};
-
 const classify = (result, expectedOutput, comparison) => {
-  if (!result.ok) return TEST_STATUS.INTERNAL_ERROR;
+  if (!result.ok || result.setupFailed) return TEST_STATUS.INTERNAL_ERROR;
   if (result.timedOut) return TEST_STATUS.TIME_LIMIT_EXCEEDED;
   // RLIMIT_CPU fires SIGXCPU then SIGKILL; either way the program burned its
   // budget, which reads as a timeout to the contestant.
@@ -39,41 +25,38 @@ const classify = (result, expectedOutput, comparison) => {
 
 const buildTestPlan = (problem) => [
   ...(problem.samples ?? []).map((sample, i) => ({
-    label: `Sample ${i + 1}`,
+    label: `Small test ${i + 1}`,
     visible: true,
     input: sample.input,
     expectedOutput: sample.output,
   })),
   ...(problem.hiddenTests ?? []).map((test, i) => ({
-    label: `Hidden ${i + 1}`,
+    label: `Large test ${i + 1}`,
     visible: false,
     input: test.input,
     expectedOutput: test.expectedOutput,
   })),
 ];
 
-const runJudge = async ({ source, problem }) => {
-  if (typeof source !== 'string' || source.trim().length === 0) {
-    return {
-      verdict: VERDICT.COMPILE_ERROR,
-      compileOutput: 'Empty submission.',
-      passed: 0,
-      total: 0,
-      testResults: [],
-      durationMs: 0,
-    };
-  }
-
+const rejectSource = (source) => {
+  const reject = (compileOutput) => ({
+    verdict: VERDICT.COMPILE_ERROR,
+    compileOutput,
+    passed: 0,
+    total: 0,
+    testResults: [],
+    durationMs: 0,
+  });
+  if (typeof source !== 'string' || source.trim().length === 0) return reject('Empty submission.');
   if (Buffer.byteLength(source, 'utf8') > JUDGE_LIMITS.maxSourceBytes) {
-    return {
-      verdict: VERDICT.COMPILE_ERROR,
-      compileOutput: `Source exceeds ${JUDGE_LIMITS.maxSourceBytes} bytes.`,
-      passed: 0,
-      total: 0,
-      testResults: [],
-      durationMs: 0,
-    };
+    return reject(`Source exceeds ${JUDGE_LIMITS.maxSourceBytes} bytes.`);
   }
+  return null;
+};
+
+const runJudge = async ({ source, problem }) => {
+  const rejected = rejectSource(source);
+  if (rejected) return rejected;
 
   const startedAt = Date.now();
   const root = judgeWorkdir();
@@ -84,7 +67,7 @@ const runJudge = async ({ source, problem }) => {
     const compiled = await compileSource({ source, workdir });
     if (!compiled.ok) {
       return {
-        verdict: VERDICT.COMPILE_ERROR,
+        verdict: compiled.internal ? VERDICT.INTERNAL_ERROR : VERDICT.COMPILE_ERROR,
         compileOutput: compiled.diagnostics,
         passed: 0,
         total: 0,
@@ -131,7 +114,7 @@ const runJudge = async ({ source, problem }) => {
         visible: test.visible,
         status,
         timeMs: result.wallMs,
-        // Only sample cases carry their data back to the client; hidden tests
+        // Only small cases carry their data back to the client; large tests
         // report nothing but a status, so the contest data never leaks.
         input: test.visible ? test.input : undefined,
         expectedOutput: test.visible ? test.expectedOutput : undefined,
@@ -168,46 +151,85 @@ const runJudge = async ({ source, problem }) => {
   }
 };
 
-export const judgeSubmission = ({ source, problem }) => enqueue(() => runJudge({ source, problem }));
+// A judge-side failure (sandbox or compiler could not start) must not be
+// recorded against the contestant: surface it as a retryable 503 instead, the
+// same way the engine backend treats an outage.
+const unscoredOnJudgeError = (result) => {
+  if (result.verdict !== VERDICT.INTERNAL_ERROR) return result;
+  const error = new Error('The judge had a problem running your code. It was not scored - please submit again.');
+  error.status = 503;
+  throw error;
+};
 
-// Compiles a trusted reference solution and collects its output for each input.
-// Seeding uses this to derive the answer key by execution instead of by hand,
-// so a problem's expected output cannot drift from its reference. Skips the
-// queue deliberately: it is admin tooling, not contestant traffic.
+export const judgeSubmission = ({ source, problem }) => {
+  if (judgeBackend() !== 'engine') return enqueue(() => runJudge({ source, problem })).then(unscoredOnJudgeError);
+
+  const rejected = rejectSource(source);
+  if (rejected) return Promise.resolve(rejected);
+  // The engine client queues on its own concurrency limit.
+  return judgeWithEngine({ source, problem, plan: buildTestPlan(problem) });
+};
+
+// Compiles a trusted program (a card's reference) once and collects its output
+// for each input. Seeding and the card audit use this, so answer keys and
+// terminal outputs come from the same backend that grades submissions.
 export const runProgramOnInputs = async ({
   source,
   inputs,
   timeLimitMs = 5000,
   memoryMb = 512,
+  onProgress,
 }) => {
+  if (judgeBackend() === 'engine') {
+    return runInputsOnEngine({ source, inputs, timeLimitMs, memoryMb });
+  }
+
   const root = judgeWorkdir();
   await mkdir(root, { recursive: true });
   const workdir = await mkdtemp(path.join(root, 'ref-'));
 
   try {
     const compiled = await compileSource({ source, workdir });
-    if (!compiled.ok) return { ok: false, error: compiled.diagnostics, outputs: [] };
+    if (!compiled.ok) return { ok: false, error: compiled.diagnostics, outputs: [], timings: [] };
 
-    const outputs = [];
-    for (const input of inputs) {
-      const result = await runOneTest({
-        binaryPath: compiled.binaryPath,
-        input,
-        timeLimitMs,
-        memoryMb,
-      });
+    const outputs = new Array(inputs.length);
+    const timings = new Array(inputs.length);
+    let failure = null;
+    let next = 0;
+    let done = 0;
 
-      if (!result.ok || result.timedOut || result.exitCode !== 0) {
-        return {
-          ok: false,
-          error: `reference failed on input ${JSON.stringify(input)} (exit=${result.exitCode}, timedOut=${result.timedOut})`,
-          outputs,
-        };
+    // Admin tooling: runs beside, not through, the contestant queue.
+    const worker = async () => {
+      while (!failure && next < inputs.length) {
+        const index = next++;
+        let result = await runOneTest({
+          binaryPath: compiled.binaryPath,
+          input: inputs[index],
+          timeLimitMs,
+          memoryMb,
+        });
+        // Tens of thousands of back-to-back sandboxes (card 10 seeds 26,013)
+        // can outrun the kernel's namespace cleanup for longer than
+        // execSandbox's own retries cover. This is admin tooling, so wait for
+        // the kernel rather than fail: up to a minute per input.
+        for (let wait = 0; wait < 12 && result.setupFailed; wait++) {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+          result = await runOneTest({ binaryPath: compiled.binaryPath, input: inputs[index], timeLimitMs, memoryMb });
+        }
+        if (!result.ok || result.timedOut || result.outputTruncated || result.exitCode !== 0) {
+          failure = `reference failed on input ${JSON.stringify(inputs[index])} (exit=${result.exitCode}, timedOut=${result.timedOut}, truncated=${result.outputTruncated}${result.stderr ? `, stderr=${result.stderr.trim().slice(0, 120)}` : ''})`;
+          return;
+        }
+        outputs[index] = result.stdout;
+        timings[index] = result.wallMs;
+        done += 1;
+        if (onProgress && done % 500 === 0) onProgress(done, inputs.length);
       }
-      outputs.push(result.stdout);
-    }
+    };
 
-    return { ok: true, outputs };
+    await Promise.all(Array.from({ length: judgeConcurrency() }, worker));
+    if (failure) return { ok: false, error: failure, outputs: [], timings: [] };
+    return { ok: true, outputs, timings };
   } finally {
     await rm(workdir, { recursive: true, force: true }).catch(() => {});
   }

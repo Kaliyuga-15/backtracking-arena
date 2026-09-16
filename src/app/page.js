@@ -11,7 +11,7 @@ const getProblems = async () => {
   // hiddenTests and referenceSolution are select:false, so nothing secret can
   // ride along into the client component below.
   return Problem.find({ level: LEVELS.BACKTRACKING, status: PROBLEM_STATUS.PUBLISHED })
-    .select('slug title order points timeLimitMs statement')
+    .select('slug title order difficulty points timeLimitMs')
     .sort({ order: 1 })
     .lean();
 };

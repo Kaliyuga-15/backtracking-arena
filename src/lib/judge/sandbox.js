@@ -42,7 +42,7 @@ const killTree = (child) => {
   }
 };
 
-export const execSandbox = ({
+const execOnce = ({
   argv,
   sandboxArgs = [],
   stdin = '',
@@ -129,11 +129,15 @@ export const execSandbox = ({
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
       resolve({
         ok: true,
         spawnError: null,
-        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-        stderr: Buffer.concat(stderrChunks).toString('utf8'),
+        // bwrap itself could not build the sandbox; the program never ran.
+        setupFailed: exitCode === 1 && stdout === '' && /^bwrap: /.test(stderr),
+        stdout,
+        stderr,
         exitCode,
         signal,
         timedOut,
@@ -162,3 +166,21 @@ export const execSandbox = ({
     // 'close' rather than 'exit': it waits for the stdio pipes to drain.
     child.on('close', (code, signal) => finish(code, signal));
   });
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const SETUP_RETRY_DELAYS_MS = [50, 250, 1000, 3000];
+
+// The kernel frees network namespaces lazily, so a burst of sandboxes can hit
+// the per-user namespace limit ("Creating new namespace failed: No space left
+// on device"). That is a judge-side failure, not the program's: wait for the
+// kernel to catch up and try again. A result that still has setupFailed set is
+// reported as a judge error by callers, never as the contestant's runtime error.
+export const execSandbox = async (options) => {
+  let result = await execOnce(options);
+  for (const delay of SETUP_RETRY_DELAYS_MS) {
+    if (!result.setupFailed) break;
+    await sleep(delay);
+    result = await execOnce(options);
+  }
+  return result;
+};

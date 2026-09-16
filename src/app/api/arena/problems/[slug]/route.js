@@ -1,7 +1,7 @@
 import { connectDB } from '@/lib/db';
 import { Problem } from '@/models/Problem';
 import { ok, fail, withErrors } from '@/lib/api';
-import { requireAdmin } from '@/lib/auth';
+import { getIdentity, requireAdmin } from '@/lib/auth';
 import { PROBLEM_STATUS } from '@/lib/constants';
 
 export const dynamic = 'force-dynamic';
@@ -16,13 +16,20 @@ export const GET = withErrors(async (request, { params }) => {
   // Draft and archived cards stay invisible to contestants.
   if (problem.status !== PROBLEM_STATUS.PUBLISHED) requireAdmin(request);
 
+  const identity = getIdentity(request);
+  if (!identity?.isAdmin) delete problem.samples;
+
   return ok(problem);
 });
 
 const EDITABLE_FIELDS = [
   'title',
   'order',
+  'difficulty',
   'statement',
+  'inputFormat',
+  'judgeFields',
+  'terminalFields',
   'hint',
   'starterCode',
   'samples',

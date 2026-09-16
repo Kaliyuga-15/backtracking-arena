@@ -6,6 +6,7 @@ const VERDICT_TONE = {
   [VERDICT.ACCEPTED]: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200',
   [VERDICT.WRONG_ANSWER]: 'border-red-400/40 bg-red-500/15 text-red-200',
   [VERDICT.TIME_LIMIT_EXCEEDED]: 'border-amber-400/40 bg-amber-500/15 text-amber-200',
+  [VERDICT.MEMORY_LIMIT_EXCEEDED]: 'border-amber-400/40 bg-amber-500/15 text-amber-200',
   [VERDICT.RUNTIME_ERROR]: 'border-orange-400/40 bg-orange-500/15 text-orange-200',
   [VERDICT.OUTPUT_LIMIT_EXCEEDED]: 'border-amber-400/40 bg-amber-500/15 text-amber-200',
   [VERDICT.COMPILE_ERROR]: 'border-fuchsia-400/40 bg-fuchsia-500/15 text-fuchsia-200',
@@ -16,6 +17,7 @@ const STATUS_MARK = {
   [TEST_STATUS.PASSED]: { glyph: 'PASS', className: 'text-emerald-300' },
   [TEST_STATUS.WRONG_ANSWER]: { glyph: 'WA', className: 'text-red-300' },
   [TEST_STATUS.TIME_LIMIT_EXCEEDED]: { glyph: 'TLE', className: 'text-amber-300' },
+  [TEST_STATUS.MEMORY_LIMIT_EXCEEDED]: { glyph: 'MLE', className: 'text-amber-300' },
   [TEST_STATUS.RUNTIME_ERROR]: { glyph: 'RE', className: 'text-orange-300' },
   [TEST_STATUS.OUTPUT_LIMIT_EXCEEDED]: { glyph: 'OLE', className: 'text-amber-300' },
   [TEST_STATUS.INTERNAL_ERROR]: { glyph: 'ERR', className: 'text-white/60' },
@@ -55,7 +57,7 @@ export default function VerdictPanel({ submission, pending }) {
     return (
       <div className="rounded-xl border border-dashed border-white/10 p-4">
         <p className="text-sm text-white/40">
-          Submit to see your verdict. Hidden tests decide the score; sample cases show a diff.
+          Submit to see your verdict. Failed small tests show a diff; large tests only report pass or fail.
         </p>
       </div>
     );

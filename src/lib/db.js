@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/arena';
+// Read at connect time: a module-level constant would capture process.env
+// before the env files are loaded.
+const mongoUri = () => process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/arena';
 
 // Next.js hot-reloads modules in dev, so the connection is cached on globalThis
 // to avoid opening a new pool on every reload.
@@ -13,7 +15,7 @@ export const connectDB = async () => {
   if (!globalCache.promise) {
     mongoose.set('strictQuery', true);
     globalCache.promise = mongoose
-      .connect(MONGODB_URI, { maxPoolSize: 10, serverSelectionTimeoutMS: 10000 })
+      .connect(mongoUri(), { maxPoolSize: 10, serverSelectionTimeoutMS: 10000 })
       .then((m) => {
         console.log('[db] connected to MongoDB');
         return m;

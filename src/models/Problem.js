@@ -22,6 +22,16 @@ const hiddenTestSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One integer the terminal reads, with the range it accepts there.
+const terminalFieldSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    min: { type: Number, required: true },
+    max: { type: Number, required: true },
+  },
+  { _id: false }
+);
+
 const problemSchema = new mongoose.Schema(
   {
     slug: { type: String, required: true, unique: true, trim: true, lowercase: true },
@@ -29,12 +39,21 @@ const problemSchema = new mongoose.Schema(
     level: { type: String, default: LEVELS.BACKTRACKING, index: true },
     order: { type: Number, default: 0 },
 
-    // Pattern-inference problems intentionally ship with little or no prose --
-    // the samples are the specification. Both stay optional.
+    difficulty: { type: String, enum: ['medium', 'hard'], default: 'medium' },
+
+    // The card describes only the input; the output format is left for the
+    // contestant to discover through the terminal.
     statement: { type: String, default: '' },
+    inputFormat: { type: String, default: '' },
+    // Displayed constraints are rendered from these ranges, so the card can
+    // never claim a range the judge does not test.
+    judgeFields: { type: [terminalFieldSchema], default: [] },
+    terminalFields: { type: [terminalFieldSchema], default: [] },
     hint: { type: String, default: '' },
     starterCode: { type: String, default: '' },
 
+    // Small tests inside the terminal range. Never rendered on the card; after a
+    // submission they are the cases that come back with an expected/actual diff.
     samples: { type: [sampleSchema], default: [] },
 
     // select:false so a plain find() can never ship the answer key to a client,
